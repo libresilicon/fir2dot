@@ -100,20 +100,30 @@ object Diagram extends Pass {
 				//println(m)
 				val context: PrintWriter = new PrintWriter(new File(m+".dot"))
 				context.write("digraph G{\n")
-				context.write("graph [rankdir=LR, splines=ortho];\nnode [shape=record]; \n")
-
-				//   context.write("\nnode [shape=record];\n")
-				val ios = (portList(m).filter(s => s.startsWith("io."))) map (port => "<" + port.split("io.", 2)(1) + ">" + port.split("io.", 2)(1))
-				context.write("io [label=\"{io|{")
-				context.write(sanitize(ios.mkString("|")) + "}")
-				context.write("}\"];\n")
+				//context.write("graph [rankdir=LR, splines=ortho];\nnode [shape=record]; \n")
+				context.write("graph [rankdir=LR];\n")
+				//context.write("node [shape=record];\n")
+				//val ios = (portList(m).filter(s => s.startsWith("io."))) map (port => "<" + port.split("io.", 2)(1) + ">" + port.split("io.", 2)(1))
+				val ios = (portList(m).filter(s => s.startsWith("io."))) map (port => "io_"+sanitize(port.split("io.", 2)(1)))
+				context.write("subgraph cluster_io {\n")
+				context.write("style=filled;\n")
+				context.write("color=lightgrey;\n")
+				context.write("node [style=filled,color=white];\n")
+				context.write(ios.mkString(";\n"))
+				if(ios.size>0) context.write(";\n")
+				context.write("label=\"io\";\n")
+				context.write("};\n")
 				for (submodule <- hierarchy(m)) {
-					context.write(submodule._2 + "[label=\"{" + submodule._2 + "|{")
-					val l = for (port <- portList(submodule._1)) yield "<" + port + ">" + port
-					context.write(sanitize(l.mkString("|")) + "}")
-					context.write("}\"];\n")
+					context.write("subgraph cluster_"+submodule._2+"{\n")
+					context.write("style=filled;\n")
+					context.write("color=lightgrey;\n")
+					context.write("node [style=filled,color=white];\n")
+					val l = for (port <- portList(submodule._1)) yield submodule._2+"_"+sanitize(port)
+					context.write(l.mkString(";\n"))
+					if(l.size>0) context.write(";\n")
+					context.write("label=\""+submodule._2+"\";\n")
+					context.write("}\n")
 				}
-
 				// connections
 				for ((what, where) <- connections(m)) {
 					var toIsOK: Boolean = false
@@ -133,12 +143,14 @@ object Diagram extends Pass {
 						fromIsOK = true
 					}
 					if (fromIsOK) {
-						from = sanitize(what.split("\\.", 2).mkString(":"))
+						from = sanitize(what.split("\\.", 2).mkString("_"))
 					}
 					if (toIsOK) {
-						to = sanitize(where.split("\\.", 2).mkString(":"))
+						to = sanitize(where.split("\\.", 2).mkString("_"))
 					}
-					context.write(from + " -> " + to + ";\n")
+					if(from!=to) {
+						context.write(from + " -> " + to + ";\n")
+					}
 				}
 				context.write("}\n")
 				context.flush()
