@@ -21,14 +21,11 @@ object Diagram extends Pass {
 	}
 
 	def dumpConnect(m: DefModule)(c: Connect): Unit = {
-		//    println(c.loc)
-		//    println(dumpLoc(c.loc, "") + " <= " + dumpLoc(c.expr, ""))
 		if (connections contains m.name) {
 			connections(m.name) = connections(m.name) :+ (dumpLoc(c.loc, ""), dumpLoc(c.expr, ""))
 		} else {
 			connections(m.name) = Seq((dumpLoc(c.loc, ""), dumpLoc(c.expr, "")))
 		}
-		//println(c.loc + "<=" + c.expr)
 	}
 
 	def dumpStmts(m: DefModule)(s: Statement): Statement = {
@@ -93,35 +90,108 @@ object Diagram extends Pass {
 		s.replace(".", "_").replace("[", "_").replace("]", "")
 	}
 
+	def isMultiPort(l: Seq[String], k: String): Boolean = {
+		val portpins = l.filter(s => s.startsWith(k+"."))
+		if( portpins.length != 0 ) { for ( portpin <- portpins ) {
+			var ppar = portpin.split(k+"\\.", 2)
+			if( ppar.length ==2 ) {
+				var ppn = ppar(1).split("\\.", 2)
+				if( ppn.length == 2 ) return true;
+			}
+		}}
+		return false
+	}
+	
+	def getSubPins(p: Seq[String], l: Seq[String], k: String): Seq[String] = {
+		var ret = Array[String] ()
+		var ios = (l.filter(s => s.startsWith(k+".")))
+		var fil = k.replace("[", "_").replace("]", "")
+		for ( io <- ios ) {
+			var newIO = io.replace("[", "_").replace("]", "")
+			var ioar = newIO.split(fil+"\\.", 2)
+			if( ioar.length > 1 ) {
+				var fullPathArray = p ++ Array(ioar(1))
+				var rs = sanitize(ioar(1))
+				//rs = rs + "<"
+				//rs = rs + sanitize(fullPathArray.mkString("_"))
+				//rs = rs + ">"
+				ret = Array(rs) ++ ret
+			} else {
+				println(ioar)
+			}
+		}
+		return ret
+	}
+
+	def getPortGraphString(p: Seq[String], l: Seq[String]) : String = {
+		var ret=""
+		var subgraphs = Array[String] ()
+		var ports = Array[String] ()
+		for ( iopin <- l ) {
+			var keys = iopin.split("\\.", 2)
+			if(keys(0)!="") {
+				/*if(isMultiPort(l,keys(0))) {
+					if( !( subgraphs contains keys(0) ) ) subgraphs = Array(keys(0)) ++ subgraphs
+				} else if(keys.length==1) {
+					var fullPathArray = p ++ Array(keys(0))
+					ret=ret+"node_"+sanitize(fullPathArray.mkString("_"))+" [shape=box, label=\""
+					ret=ret+sanitize(keys(0))
+					ret=ret+"\"];\n"
+				} else  {
+					if( !( ports contains keys(0) ) ) ports = Array(keys(0)) ++ ports
+				}*/
+				if(keys.length==1) {
+					var fullPathArray = p ++ Array(keys(0))
+					ret=ret+"node_"+sanitize(fullPathArray.mkString("_"))+" [shape=box, label=\""
+					ret=ret+sanitize(keys(0))
+					ret=ret+"\"];\n"
+				} else if(isMultiPort(l,keys(0))) {
+					if( !( subgraphs contains keys(0) ) ) subgraphs = Array(keys(0)) ++ subgraphs
+				}
+			}
+		}
+		for ( portname <- ports ) {
+			var ios = getSubPins(p, l, portname)
+			var fullPathArray = p ++ Array(portname)
+			ret=ret+"node_"+sanitize(fullPathArray.mkString("_"))+" [shape=record, label=\""+sanitize(portname)+"|{"+ios.mkString("|")+"}\"];\n"
+		}
+		for ( subgraph <- subgraphs ) {
+			var ios = (l.filter(s => s.startsWith(subgraph+"."))) map (port => port.split(subgraph+"\\.", 2)(1))
+			ret=ret+"subgraph cluster_"+sanitize(subgraph)+" {\n"
+			ret=ret+"graph[style=dotted];\n"
+			ret=ret+"color=blue;\n"
+			ret=ret+"label=\""+sanitize(subgraph)+"\";\n"
+			ret=ret+getPortGraphString(p++Array(subgraph), ios)
+			ret=ret+"}\n"
+		}
+		ret
+	}
+
+	def getConnectionLeaf(l: String) : String = {
+		var ar = l.split("\\.", 2)
+		if ( ar.length == 2 ) {
+			return "_"+sanitize(ar(0))+getConnectionLeaf(ar(1))
+		} else {
+			return ":"+sanitize(ar(0))
+		}
+	}
+
 	override def run(c: Circuit): Circuit = {
 		c.modules foreach dumpModule
 		for (m <- hierarchy.keys) {
 			if(m!="PlusArgTimeout") {
-				//println(m)
 				val context: PrintWriter = new PrintWriter(new File(m+".dot"))
 				context.write("digraph G{\n")
-				//context.write("graph [rankdir=LR, splines=ortho];\nnode [shape=record]; \n")
-				context.write("graph [rankdir=LR];\n")
-				//context.write("node [shape=record];\n")
-				//val ios = (portList(m).filter(s => s.startsWith("io."))) map (port => "<" + port.split("io.", 2)(1) + ">" + port.split("io.", 2)(1))
-				val ios = (portList(m).filter(s => s.startsWith("io."))) map (port => "io_"+sanitize(port.split("io.", 2)(1)))
-				context.write("subgraph cluster_io {\n")
-				context.write("style=filled;\n")
-				context.write("color=lightgrey;\n")
-				context.write("node [style=filled,color=white];\n")
-				context.write(ios.mkString(";\n"))
-				if(ios.size>0) context.write(";\n")
-				context.write("label=\"io\";\n")
-				context.write("};\n")
+				context.write("subgraph cluster_"+sanitize(m)+" {\n")
+				context.write("graph [style=dotted, rankdir=LR];\n")
+				context.write("label=\""+sanitize(m)+"\";\n")
+				context.write(getPortGraphString(Array(m), portList(m))) // io ports
+				// sub modules
 				for (submodule <- hierarchy(m)) {
-					context.write("subgraph cluster_"+submodule._2+"{\n")
-					context.write("style=filled;\n")
-					context.write("color=lightgrey;\n")
-					context.write("node [style=filled,color=white];\n")
-					val l = for (port <- portList(submodule._1)) yield submodule._2+"_"+sanitize(port)
-					context.write(l.mkString(";\n"))
-					if(l.size>0) context.write(";\n")
-					context.write("label=\""+submodule._2+"\";\n")
+					context.write("subgraph cluster_"+sanitize(submodule._2)+"{\n")
+					context.write("graph [style=dotted, rankdir=LR];\n")
+					context.write("label=\""+sanitize(submodule._2)+"\";\n")
+					context.write(getPortGraphString(Array(m)++Array(submodule._2), portList(submodule._1)))
 					context.write("}\n")
 				}
 				// connections
@@ -143,30 +213,35 @@ object Diagram extends Pass {
 						fromIsOK = true
 					}
 					if (fromIsOK) {
-						from = sanitize(what.split("\\.", 2).mkString("_"))
+						from = "node_"+m+getConnectionLeaf(what)
 					}
 					if (toIsOK) {
-						to = sanitize(where.split("\\.", 2).mkString("_"))
+						to = "node_"+m+getConnectionLeaf(where)
 					}
 					if(from!=to) {
+						if ( (toModuleName == "clock") || ( fromModuleName == "clock" ) ) {
+							context.write("edge [dir=none, color=green]")
+						} else if ( (toModuleName == "reset") || ( fromModuleName == "reset" ) ) {
+							context.write("edge [dir=none, color=red]")
+						} else {
+							context.write("edge [dir=none, color=black]")
+						}
 						context.write(from + " -> " + to + ";\n")
 					}
 				}
+				context.write("}\n")
 				context.write("}\n")
 				context.flush()
 				context.close()
 			}
 		}
-		//println(hierarchy)
-		//println(portList)
 		c
 	}
 }
 
 object Main extends App {
 	if (args.length != 1) {
-	println("Usage: diagram fir_file")
-
+		println("Usage: diagram fir_file")
 	} else {
 		val input: String = scala.io.Source.fromFile(args(0)).mkString
 		val state = CircuitState(firrtl.Parser.parse(input), UnknownForm)
